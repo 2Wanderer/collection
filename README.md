@@ -1,7 +1,13 @@
 # collection
 collection of security tools as a docker-compose
 
-- you manualy need to create a bucket in minio named thehive, inoder to save data and screenshot in TH
+- You manualy need to create a bucket in minio named thehive, inoder to save data and screenshot in TH
+
+- Default credentials TH: admin@thehive.local passwd: secret
+
+- Default credentials Minio: minioadmin passwd: minio
+
+- Default password n8n: thehive passwd: thehive
 
 - Cortex api key must configured in TH gui to connect Cortex
 
