@@ -246,8 +246,3 @@ networks:
   cassandra-net: null
   misp-net: null
   es-net: null
-
-
-
-	  
-
