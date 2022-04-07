@@ -1,95 +1,253 @@
-version: '3.8'
+version: '3.3'
+
 services:
-   nginx:
-    container_name: nginx
-    hostname: nginx
-    image: nginx:latest
-    ports:
-      - 443:443
+ watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
     volumes:
-      - ./vol/nginx:/etc/nginx/conf.d
-      - ./vol/ssl:/etc/ssl
-    restart: on-failure
-    links:
-      - thehive
-  elasticsearch:
-    image: 'elasticsearch:7.11.1'
-    container_name: elasticsearch
-    restart: unless-stopped
-    ports:
-      - '0.0.0.0:9200:9200'
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - http.host=0.0.0.0
-      - discovery.type=single-node
-      - cluster.name=hive
-      - script.allowed_types= inline
-      - thread_pool.search.queue_size=100000
-      - thread_pool.write.queue_size=10000
-      - gateway.recover_after_nodes=1
-      - xpack.security.enabled=false
-      - bootstrap.memory_lock=true
-      - ES_JAVA_OPTS=-Xms256m -Xmx256m
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-    volumes:
-      - './vol/elasticsearch/data:/usr/share/elasticsearch/data'
-      - './vol/elasticsearch/logs:/usr/share/elasticsearch/logs'
-  cortex:
-    image: 'thehiveproject/cortex:latest'
-    container_name: cortex
+     - WATCHTOWER_CLEANUP=true
+     #- WATCHTOWER_LABEL_ENABLE=true
+     - WATCHTOWER_INCLUDE_RESTARTING=true
+     - WATCHTOWER_NOTIFICATIONS=email
+     #- WATCHTOWER_NOTIFICATION_EMAIL_FROM=
+     #- WATCHTOWER_NOTIFICATION_EMAIL_TO=
+     #- WATCHTOWER_NOTIFICATION_EMAIL_SERVER=
+     #- WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PORT=
+     #- WATCHTOWER_NOTIFICATION_EMAIL_SERVER_USER=
+     #- WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PASSWORD=
+     #- WATCHTOWER_NOTIFICATION_EMAIL_DELAY=2
+
+ postgres:
+    image: postgres
+    container_name: PostgresDB
     restart: unless-stopped
-    command:
-      --job-directory ${JOB_DIRECTORY}
     environment:
-      - 'JOB_DIRECTORY=${JOB_DIRECTORY}'
+      - 'POSTGRES_USER=n8nuser'
+      - 'POSTGRES_PASSWORD=n8npass'
+      - 'POSTGRES_DB=n8n'
     volumes:
-      - './vol/cortex/application.conf:/etc/cortex/application.conf'
-      - '${JOB_DIRECTORY}:${JOB_DIRECTORY}'
-      - '/var/run/docker.sock:/var/run/docker.sock'
-    depends_on:
-      - elasticsearch
-    ports:
-      - '0.0.0.0:9001:9001'
-       n8n:
+      - 'postgres:/var/lib/postgresql/data'
+    networks:
+      - n8n-net
+
+ n8n.nl:
     image: n8nio/n8n
     container_name: n8n
+    hostname: n8n.nl
     restart: unless-stopped
     environment:
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
-      - 'DB_POSTGRESDB_DATABASE=${POSTGRES_DB}'
-      - 'DB_POSTGRESDB_USER=${POSTGRES_USER}'
-      - 'DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}'
-      - 'N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE}'
-      - 'N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}'
-      - 'N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}'
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=n8nuser
+      - DB_POSTGRESDB_PASSWORD=n8npass
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=thehive
+      - N8N_BASIC_AUTH_PASSWORD=thehive
+      #- N8N_EMAIL_MODE=smtp
+      #- N8N_SMTP_HOST=
+      #- N8N_SMTP_PORT=
+      #- N8N_SMTP_USER=
+      #- N8N_SMTP_PASS=
+      #- N8N_SMTP_SENDER=
+      #- N8N_SMTP_SSL=true
+      #- N8N_EDITOR_BASE_URL=
+      #- WEBHOOK_URL=
     ports:
       - '0.0.0.0:5678:5678'
     links:
       - postgres
     volumes:
-      - './vol/n8n/.n8n:/root/.n8n'
-      - './vol/n8n/workflows:/opt/workflows'
+      - 'n8n:/root/.n8n'
+      - 'n8n:/opt/workflows'
     networks:
       - n8n-net
       - default
-    command: n8n start
-  thehive:
-    image: 'thehiveproject/thehive4:latest'
-    container_name: 'thehive4'
-    ports:
-      - '0.0.0.0:9000:9000'
+
+ cassandra:
+    image: 'cassandra:4'
+    container_name: cassandra
+    restart: unless-stopped
+    hostname: cassandra
+    environment:
+      - MAX_HEAP_SIZE=1G
+      - HEAP_NEWSIZE=1G
+      - CASSANDRA_CLUSTER_NAME=thp
     volumes:
-      - './vol/thehive/application.conf:/etc/thehive/application.conf'
-      - './vol/thehive/db:/opt/thp/thehive/db'
-      - './vol/thehive/data:/opt/thp/thehive/data'
-      - './vol/thehive/index:/opt/thp/thehive/index'
+      - cassandra:/var/lib/cassandra/data'
+    networks:
+      - cassandra-net
+
+ thehive:
+     image: strangebee/thehive:5.0.0-1
+     depends_on:
+      - cassandra
+      - elasticsearch
+      - minio
+     mem_limit: 1500m
+
+     ports:
+      - "9000:9000"
+     environment:
+      - JVM_OPTS="-Xms1024M -Xmx1024M"
+     command:
+      #- --config-file
+      #- "/vol/thehive/application.conf"
+      - --secret
+      - "mySecretForTheHive"
+      - "--cql-hostnames"
+      - "cassandra"
+      - "--index-backend"
+      - "elasticsearch"
+      - "--es-hostnames"
+      - "elasticsearch"
+      - "--s3-endpoint"
+      - "http://minio:9000"
+      - "--s3-access-key"
+      - "minioadmin"
+      - "--s3-secret-key"
+      - "minioadmin"
+      - "--s3-use-path-access-style"
+     networks:
+      - default
+      - cassandra-net
+      - n8n-net
+      - es-net
+      - misp-net
+ minio:
+    image: quay.io/minio/minio
+    command: ["minio", "server", "/data", "--console-address", ":9001"]
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - "9002:9001"
+    volumes:
+      - "miniodata:/data"
+
+ elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.16.2
+    mem_limit: 512m
+    ports:
+      - "9900:9900"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    volumes:
+      - elasticsearchdata:/usr/share/elasticsearch/data
+    networks:
+      - es-net
+ cortex:
+    image: 'thehiveproject/cortex:latest'
+    container_name: cortex
+    restart: unless-stopped
+    command:
+      --job-directory /opt/cortex/jobs
+    environment:
+      - JOB_DIRECTORY=/opt/cortex/jobs
+    volumes:
+      #- /vol/cortex-application.conf:/etc/cortex/application.conf
+      #- /opt/cortex/jobs:/opt/cortex/jobs
+      - '/var/run/docker.sock:/var/run/docker.sock'
+    depends_on:
+      - elasticsearch
+   #   - es02
+   #   - es03
+    ports:
+      - '0.0.0.0:9001:9001'
     networks:
       - default
-    command: '--no-config --no-config-secret'
+      - es-net
+ redis:
+    image: redis:latest
+    container_name: redis
+    restart: unless-stopped
+    networks:
+    - misp-net
+
+ db:
+    image: mysql:latest
+    container_name: mysql
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      - "MYSQL_USER=misp"
+      - "MYSQL_PASSWORD=example"
+      - "MYSQL_ROOT_PASSWORD=password"
+      - "MYSQL_DATABASE=misp"
+    volumes:
+      - /vol/mysql:/var/lib/mysql
+    networks:
+    - misp-net
+ misp:
+    image: coolacid/misp-docker:core-latest
+    container_name: misp
+    restart: unless-stopped
+    depends_on:
+    - redis
+    - db
+    ports:
+    - "80:80"
+    - "443:443"
+    environment:
+    - "HOSTNAME=https://192.168.13.39"
+    - "REDIS_FQDN=redis"
+    - "INIT=true"             # Initialze MISP, things includes, attempting to import SQL and the Files DIR
+    - "CRON_USER_ID=1"        # The MISP user ID to run cron jobs as
+    - "DISIPV6=true" # Disable IPV6 in nginx
+    networks:
+    - misp-net
+    - default
+
+ misp-modules:
+    image: coolacid/misp-docker:modules-latest
+    container_name: misp-modules
+    restart: unless-stopped
+    environment:
+    - "REDIS_BACKEND=redis"
+    depends_on:
+    - redis
+    - db
+
+    networks:
+    - misp-net
+
+# imap2thehive:
+#    restart: unless-stopped
+#    image: marvy19/imap2thehive:imap2thehive
+#    container_name: imap2thehive
+#    volumes:
+#     - type: bind
+#       source: "/vol/imap2thehive.conf"
+#       target: /etc/imap2thehive.conf
+#       read_only: true
+#    networks:
+#     - default
+
+volumes:
+  cassandra:
+    driver: local
+  elasticsearch:
+    driver: local
+  postgres:
+    driver: local
+  n8n:
+    driver: local
+  elasticsearchdata:
+    driver: local
+  miniodata:
+    driver: local
 networks:
-  n8n-net: null
   default: null
+  n8n-net: null
+  cassandra-net: null
+  misp-net: null
+  es-net: null
+
+
+
+	  
+
