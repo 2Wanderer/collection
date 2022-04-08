@@ -87,7 +87,7 @@ services:
       - cassandra
       - elasticsearch
       - minio
-     mem_limit: 1500m
+     #mem_limit: 1500m
 
      ports:
       - "9000:9000"
